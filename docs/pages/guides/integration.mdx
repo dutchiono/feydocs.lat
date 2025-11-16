@@ -20,13 +20,68 @@ Learn how to integrate FEY Protocol into your application, from basic queries to
 
 ## Quick Start
 
-### Installation
+### Option 1: Using the Official SDK (Recommended)
+
+The official Fey SDK provides a complete, tested interface for interacting with the Fey Factory contract.
+
+```bash
+# Install the SDK
+npm install @dutchiono/fey-sdk ethers
+
+# Or with yarn
+yarn add @dutchiono/fey-sdk ethers
+
+# Or with pnpm
+pnpm add @dutchiono/fey-sdk ethers
+```
+
+```typescript
+import {
+  buildSimpleDeployTokenTx,
+  buildDeployTokenTx,
+  parseTokenCreatedEvent,
+  getFeyFactoryContract,
+  getTokenDeploymentInfo,
+  FEY_FACTORY_ADDRESS,
+  validateDeployPayload,
+} from '@dutchiono/fey-sdk';
+import { ethers } from 'ethers';
+
+// Create provider
+const provider = new ethers.JsonRpcProvider('https://mainnet.base.org');
+
+// Simple token deployment
+const tx = buildSimpleDeployTokenTx({
+  tokenAdmin: '0x...',
+  name: 'My Token',
+  symbol: 'TKN',
+  image: 'ipfs://Qm...',
+  metadata: 'ipfs://Qm...',
+  context: '',
+  originatingChainId: 8453n,
+});
+
+// Parse events from receipt
+const receipt = await provider.getTransactionReceipt(txHash);
+const event = parseTokenCreatedEvent(receipt);
+if (event) {
+  console.log('Token deployed at:', event.tokenAddress);
+}
+
+// Query deployment info
+const info = await getTokenDeploymentInfo(provider, tokenAddress);
+console.log('Hook:', info.hook);
+console.log('Locker:', info.locker);
+console.log('Extensions:', info.extensions);
+```
+
+### Option 2: Manual Integration
 
 ```bash
 # Using npm
 npm install ethers viem
 
-# Using yarn  
+# Using yarn
 yarn add ethers viem
 
 # Using pnpm
@@ -102,7 +157,7 @@ class FeyProtocolClient {
     try {
       const deploymentInfo = await this.contracts.factory.tokenDeploymentInfo(tokenAddress);
       const tokenContract = new ethers.Contract(tokenAddress, feyTokenABI, this.provider);
-      
+
       const [name, symbol, decimals, totalSupply, metadata] = await Promise.all([
         tokenContract.name(),
         tokenContract.symbol(),
@@ -140,7 +195,7 @@ class FeyProtocolClient {
   async getFeeInfo(feeOwner: string, tokenAddress: string) {
     const feeLocker = new ethers.Contract(CONTRACTS.feeLocker, feeLockerABI, this.provider);
     const availableFees = await feeLocker.availableFees(feeOwner, tokenAddress);
-    
+
     return {
       feeOwner,
       token: tokenAddress,
@@ -151,7 +206,82 @@ class FeyProtocolClient {
 }
 ```
 
-### 2. Token Deployment Interface
+### 2. Token Deployment with SDK
+
+The SDK provides two main functions for building deployment transactions:
+
+**Simple Deployment** (recommended for most use cases):
+```typescript
+import { buildSimpleDeployTokenTx } from '@dutchiono/fey-sdk';
+
+const tx = buildSimpleDeployTokenTx(
+  {
+    tokenAdmin: '0x...',
+    name: 'My Token',
+    symbol: 'TKN',
+    image: 'ipfs://Qm...',
+    metadata: 'ipfs://Qm...',
+    context: 'Optional context',
+    originatingChainId: 8453n, // Base mainnet
+  },
+  {
+    poolConfig: {
+      hook: '0x5B409184204b86f708d3aeBb3cad3F02835f68cC',
+      tickSpacing: 60,
+    },
+    value: ethers.parseEther('1.0'), // ETH for extensions
+  }
+);
+
+// Sign and send
+const signedTx = await signer.signTransaction(tx);
+const receipt = await provider.broadcastTransaction(signedTx);
+```
+
+**Full Deployment** (for advanced configurations):
+```typescript
+import { buildDeployTokenTx } from '@dutchiono/fey-sdk';
+import type { DeploymentConfig } from '@dutchiono/fey-sdk';
+
+const config: DeploymentConfig = {
+  tokenConfig: {
+    tokenAdmin: '0x...',
+    name: 'My Token',
+    symbol: 'TKN',
+    salt: ethers.randomBytes(32),
+    image: 'ipfs://Qm...',
+    metadata: 'ipfs://Qm...',
+    context: '',
+    originatingChainId: 8453n,
+  },
+  poolConfig: {
+    hook: '0x5B409184204b86f708d3aeBb3cad3F02835f68cC',
+    pairedToken: ethers.ZeroAddress,
+    tickIfToken0IsFey: 0,
+    tickSpacing: 60,
+    poolData: '0x',
+  },
+  lockerConfig: {
+    locker: '0x975aF6a738f502935AFE64633Ad3EA2A3eb3e7Fa',
+    rewardAdmins: ['0x...'],
+    rewardRecipients: ['0x...'],
+    rewardBps: [10000],
+    tickLower: [-887272],
+    tickUpper: [887272],
+    positionBps: [10000],
+    lockerData: '0x',
+  },
+  mevModuleConfig: {
+    mevModule: '0x2ebc0fA629b268dFA3d455b67027d507a562EAC0',
+    mevModuleData: '0x',
+  },
+  extensionConfigs: [],
+};
+
+const tx = buildDeployTokenTx(config, ethers.parseEther('1.0'));
+```
+
+### 3. Token Deployment Interface (Manual)
 
 ```typescript
 interface DeploymentConfig {
@@ -232,7 +362,7 @@ class FeyDeploymentService {
           extension: params.devBuyAmount ? '0x173077c319c38bb08D4C4968014357fd518446b4' : ethers.ZeroAddress,
           extensionData: '0x',
           feeData: ethers.AbiCoder.defaultAbiCoder().encode(
-            ['uint24', 'uint24'], 
+            ['uint24', 'uint24'],
             [3000, 3000] // 0.3% fees both directions
           ),
         }),
@@ -265,7 +395,7 @@ class FeyDeploymentService {
     onProgress?: (step: string) => void;
   }) {
     const { onProgress } = options || {};
-    
+
     try {
       onProgress?.('Validating configuration...');
       this.validateConfig(config);
@@ -303,7 +433,7 @@ class FeyDeploymentService {
       const tokenAddress = parsedEvent.args.tokenAddress;
 
       onProgress?.('Deployment completed!');
-      
+
       return {
         tokenAddress,
         transactionHash: tx.hash,
@@ -440,7 +570,7 @@ class FeyMonitoringService {
   // Monitor token transfers (for volume tracking)
   onTokenTransfer(tokenAddress: string, callback: (event: any) => void) {
     const tokenContract = new ethers.Contract(tokenAddress, feyTokenABI, this.provider);
-    
+
     const listener = tokenContract.on('Transfer', (from, to, amount, event) => {
       callback({
         from,
@@ -461,7 +591,7 @@ class FeyMonitoringService {
   async getTokenCreationHistory(fromBlock: number = 0) {
     const filter = this.contracts.factory.filters.TokenCreated();
     const events = await this.contracts.factory.queryFilter(filter, fromBlock);
-    
+
     return events.map(event => ({
       tokenAddress: event.args.tokenAddress,
       creator: event.args.msgSender,
@@ -498,7 +628,7 @@ export function useFeyProtocol() {
 
   useEffect(() => {
     const client = new FeyProtocolClient(provider);
-    
+
     client.getProtocolStatus()
       .then(setProtocolStatus)
       .catch(console.error)
@@ -518,7 +648,7 @@ export function useTokenInfo(tokenAddress?: string) {
 
     setLoading(true);
     const client = new FeyProtocolClient(provider);
-    
+
     client.getTokenInfo(tokenAddress)
       .then(setTokenInfo)
       .catch(console.error)
@@ -534,7 +664,7 @@ export function useRealtimeEvents() {
 
   useEffect(() => {
     const monitor = new FeyMonitoringService(provider);
-    
+
     monitor.onTokenCreated((event) => {
       setEvents(prev => [event, ...prev].slice(0, 100)); // Keep last 100 events
     });
@@ -567,7 +697,7 @@ export function ProtocolStatus() {
       <div className={`status-indicator ${protocolStatus?.protocolReady ? 'ready' : 'not-ready'}`}>
         {protocolStatus?.protocolReady ? '🟢 Protocol Ready' : '🔴 Protocol Not Ready'}
       </div>
-      
+
       <div className="details">
         <p><strong>Base Token:</strong> {protocolStatus?.baseToken}</p>
         <p><strong>Total Supply:</strong> {protocolStatus?.totalSupply}</p>
@@ -626,7 +756,7 @@ export function TokenDeploymentForm() {
           required
         />
       </div>
-      
+
       <div>
         <label>Symbol:</label>
         <input
@@ -635,7 +765,7 @@ export function TokenDeploymentForm() {
           required
         />
       </div>
-      
+
       <div>
         <label>Dev Buy Amount (ETH):</label>
         <input
@@ -683,7 +813,7 @@ describe('FEY Protocol Integration', () => {
 
   it('should get protocol status', async () => {
     const status = await client.getProtocolStatus();
-    
+
     expect(status).toHaveProperty('deprecated');
     expect(status).toHaveProperty('baseToken');
     expect(status).toHaveProperty('totalSupply');
@@ -692,7 +822,7 @@ describe('FEY Protocol Integration', () => {
 
   it('should get FEY token information', async () => {
     const tokenInfo = await client.getTokenInfo(CONTRACTS.feyToken);
-    
+
     expect(tokenInfo.name).toBe('FEY');
     expect(tokenInfo.symbol).toBe('FEY');
     expect(tokenInfo.decimals).toBe(18);
@@ -701,7 +831,7 @@ describe('FEY Protocol Integration', () => {
 
   it('should validate deployment config', () => {
     const service = new FeyDeploymentService(mockSigner);
-    
+
     expect(() => {
       service['validateConfig']({
         lockerConfig: {
@@ -727,12 +857,12 @@ import { ethers } from 'ethers';
 
 describe('End-to-End Integration', () => {
   // Note: These tests require a funded test wallet and should run on testnet
-  
+
   it('should deploy a token end-to-end', async () => {
     // This would be a comprehensive test of the entire deployment flow
     // Requires testnet environment and funded wallet
   });
-  
+
   it('should monitor events correctly', async () => {
     // Test event monitoring functionality
   });
@@ -764,7 +894,7 @@ export function handleContractError(error: any): never {
         'FACTORY_DEPRECATED'
       );
     }
-    
+
     if (error.reason?.includes('BaseTokenNotSet')) {
       throw new FeyIntegrationError(
         'Protocol not fully initialized',
@@ -828,7 +958,7 @@ async function batchTokenQueries(tokenAddresses: string[]) {
   ]);
 
   const results = await multicall({ contracts: calls });
-  
+
   // Process batched results
   return tokenAddresses.map((address, i) => ({
     address,
@@ -849,14 +979,14 @@ class CachedFeyClient extends FeyProtocolClient {
   async getTokenInfo(tokenAddress: string) {
     const cacheKey = `token-${tokenAddress}`;
     const cached = this.cache.get(cacheKey);
-    
+
     if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
       return cached.data;
     }
 
     const data = await super.getTokenInfo(tokenAddress);
     this.cache.set(cacheKey, { data, timestamp: Date.now() });
-    
+
     return data;
   }
 }

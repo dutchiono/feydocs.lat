@@ -72,6 +72,46 @@ interface ExtensionConfig {
 
 ## Step-by-Step Deployment
 
+### Using the Official SDK (Recommended)
+
+The easiest way to deploy tokens is using the official Fey SDK:
+
+```typescript
+import { buildSimpleDeployTokenTx, parseTokenCreatedEvent } from '@dutchiono/fey-sdk';
+import { ethers } from 'ethers';
+
+// Setup
+const provider = new ethers.JsonRpcProvider('https://mainnet.base.org');
+const signer = new ethers.Wallet(PRIVATE_KEY, provider);
+
+// Build deployment transaction
+const tx = buildSimpleDeployTokenTx(
+  {
+    tokenAdmin: await signer.getAddress(),
+    name: 'My Token',
+    symbol: 'TKN',
+    image: 'ipfs://Qm...',
+    metadata: 'ipfs://Qm...',
+    context: 'Optional description',
+    originatingChainId: 8453n,
+  },
+  {
+    value: ethers.parseEther('1.0'), // ETH for extensions
+  }
+);
+
+// Send transaction
+const receipt = await (await signer.sendTransaction(tx)).wait();
+
+// Parse event to get token address
+const event = parseTokenCreatedEvent(receipt);
+console.log('Token deployed at:', event?.tokenAddress);
+```
+
+For more details, see the [SDK Guide →](/guides/sdk).
+
+### Manual Deployment
+
 ### 1. Prepare Configuration
 
 Before deployment, gather all required information:
@@ -185,7 +225,7 @@ sequenceDiagram
     participant PoolManager
 
     User->>Factory: deployToken(config) + ETH
-    
+
     rect rgb(240, 248, 255)
         Note over Factory, Deployer: Token Creation Phase
         Factory->>Deployer: deployToken(tokenConfig, 100B)
@@ -202,7 +242,7 @@ sequenceDiagram
     end
 
     rect rgb(255, 248, 240)
-        Note over Factory, Locker: Liquidity Phase  
+        Note over Factory, Locker: Liquidity Phase
         Factory->>Locker: placeLiquidity(...)
         Locker->>PoolManager: Mint LP positions
         Locker->>Locker: Configure reward splits
@@ -406,6 +446,6 @@ console.log(`${name}: ${totalSupply.toString()} total supply`);
 After deployment:
 
 - **Monitor Trading**: [Trading & Swaps →](/flows/swapping)
-- **Claim Rewards**: [Fee Collection →](/flows/fees)  
+- **Claim Rewards**: [Fee Collection →](/flows/fees)
 - **Track Performance**: [State Queries →](/guides/queries)
 - **Manage Token**: [Admin Operations →](/support/admin)

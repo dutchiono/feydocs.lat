@@ -36,28 +36,64 @@ The Factory contract serves as the entry point for token deployments and the con
 
 ### Token Deployment
 
+#### deployToken
+
 ```solidity
-function deployToken(DeploymentConfig memory deploymentConfig) 
-    public payable nonReentrant 
+function deployToken(DeploymentConfig memory deploymentConfig)
+    public payable nonReentrant
     returns (address tokenAddress)
 ```
 
-The main function for creating new tokens. Requires comprehensive configuration and can include ETH for extensions.
+The main function for creating new tokens with full liquidity pool setup. Requires comprehensive configuration and can include ETH for extensions.
 
 **Parameters:**
-- `deploymentConfig`: Complete deployment configuration including token metadata, pool settings, liquidity config, and extensions
+- `deploymentConfig`: Complete deployment configuration including:
+  - `tokenConfig`: Token metadata, admin, salt, and chain ID
+  - `poolConfig`: Pool hook, paired token, tick configuration
+  - `lockerConfig`: LP positions, reward distribution
+  - `mevModuleConfig`: MEV protection module
+  - `extensionConfigs[]`: Array of extension configurations
 
 **Returns:**
 - `tokenAddress`: Address of the newly created token
 
 **Process:**
 1. Validates deployment is allowed (not deprecated, or using bootstrap)
-2. Creates token via `FeyDeployer.deployToken()` 
+2. Creates token via `FeyDeployer.deployToken()` with 100B supply
 3. Initializes pool through hook contract
 4. Sets up liquidity positions via locker
-5. Executes extensions (dev buys, etc.)
+5. Executes extensions (dev buys, etc.) with provided ETH
 6. Enables MEV protection
 7. Stores deployment info for tracking
+8. Emits `TokenCreated` event
+
+**Value:**
+- Must send ETH equal to sum of all `extensionConfigs[].msgValue`
+- If no extensions, send 0 ETH
+
+#### deployTokenZeroSupply
+
+```solidity
+function deployTokenZeroSupply(TokenConfig memory tokenConfig)
+    public nonReentrant
+    returns (address tokenAddress)
+```
+
+Creates a token with zero supply (no initial liquidity pool). Useful for tokens that will be deployed on other chains first, or for custom liquidity setup.
+
+**Parameters:**
+- `tokenConfig`: Basic token configuration (name, symbol, metadata, admin, salt, chain ID)
+
+**Returns:**
+- `tokenAddress`: Address of the newly created token
+
+**Differences from deployToken:**
+- No pool initialization
+- No liquidity positions
+- No extensions
+- No MEV module
+- Token starts with 0 supply
+- Can be used for cross-chain deployments where liquidity is added later
 
 ### Fee Management
 
@@ -80,12 +116,14 @@ Public functions for routing accumulated fees to their destinations.
 
 ### System Configuration
 
+#### Module Management
+
 ```solidity
-function setBaseToken(address baseToken_) external onlyOwnerAdminOrBootstrap
 function setHook(address hook, bool enabled) external onlyOwnerAdminOrBootstrap
 function setLocker(address locker, address hook, bool enabled) external onlyOwnerAdminOrBootstrap
 function setExtension(address extension, bool enabled) external onlyOwnerAdminOrBootstrap
 function setMevModule(address mevModule, bool enabled) external onlyOwnerAdminOrBootstrap
+function setAdmin(address admin, bool enabled) external onlyOwnerAdminOrBootstrap
 ```
 
 Administrative functions for configuring protocol modules.
@@ -95,13 +133,48 @@ Administrative functions for configuring protocol modules.
 - Bootstrap permissions can be released permanently
 - Some settings can be frozen permanently
 
+**Module Enablement:**
+- Hooks: Enable/disable pool hooks for deployments
+- Lockers: Enable locker/hook combinations
+- Extensions: Add/remove approved extensions
+- MEV Modules: Enable/disable MEV protection modules
+- Admins: Grant/revoke admin privileges
+
+#### Core Configuration
+
+```solidity
+function setBaseToken(address baseToken_) external onlyOwnerAdminOrBootstrap
+function setBootstrap(address bootstrap_) external onlyOwnerAdminOrBootstrap
+function setDeprecated(bool deprecated_) external onlyOwnerAdminOrBootstrap
+function setTeamFeeRecipient(address teamFeeRecipient_) external onlyOwner
+function setFeeLocker(address feeLocker_) external onlyOwner
+function setHookBaseToken(address hook) external onlyOwnerAdminOrBootstrap
+```
+
+**Critical Settings:**
+- `setBaseToken`: Sets the FEY base token (bootstrap only initially)
+- `setBootstrap`: Sets bootstrap address (can be released)
+- `setDeprecated`: Pauses new deployments (owner/admin)
+- `setTeamFeeRecipient`: Sets fee recipient (owner only, can be frozen)
+- `setFeeLocker`: Sets fee locker for stakers (owner only, can be frozen)
+- `setHookBaseToken`: Configures hook's base token reference
+
+#### Freeze Functions
+
+```solidity
+function freezeTeamFeeRecipient() external onlyOwner
+function freezeFeeLocker() external onlyOwner
+```
+
+Permanently locks critical addresses. Once frozen, these addresses cannot be changed, providing security guarantees for users.
+
 ## State Variables
 
 ### Core Configuration
 
 ```solidity
 address public baseToken;           // FEY token address (0xD09...91D)
-bool public deprecated;             // Blocks new deployments if true  
+bool public deprecated;             // Blocks new deployments if true
 address public teamFeeRecipient;    // Receives fees (0x72f...d8C50)
 address public feeLocker;          // Stores fees for stakers
 address public bootstrap;          // Bootstrap permissions
@@ -175,7 +248,7 @@ struct DeploymentInfo {
 - Freeze critical settings
 - Manage admin roles
 
-**Admin** 
+**Admin**
 - Configure modules and extensions
 - Manage non-critical settings
 - Trigger fee claims
@@ -203,53 +276,175 @@ Permanent freeze mechanisms for critical addresses:
 
 ```solidity
 event TokenCreated(
-    address indexed msgSender,
-    address indexed tokenAddress,
-    address indexed tokenAdmin,
-    string tokenMetadata,
-    string tokenImage,
-    string tokenName,
-    string tokenSymbol,
-    string tokenContext,
-    address poolHook,
-    PoolId poolId,
-    int24 startingTick,
-    address pairedToken,
-    address locker,
-    address mevModule,
-    uint256 extensionsSupply,
-    address[] extensions
+    address indexed msgSender,        // Address that called deployToken
+    address indexed tokenAddress,      // Newly created token address
+    address indexed tokenAdmin,        // Token admin address
+    string tokenImage,                // Token image URL
+    string tokenName,                 // Token name
+    string tokenSymbol,               // Token symbol
+    string tokenMetadata,              // Token metadata URL
+    string tokenContext,               // Additional context string
+    int24 startingTick,                // Starting price tick
+    address poolHook,                  // Pool hook address
+    PoolId poolId,                    // Uniswap V4 pool ID (bytes32)
+    address pairedToken,               // Paired token (FEY)
+    address locker,                    // LP locker address
+    address mevModule,                 // MEV module address
+    uint256 extensionsSupply,          // Total supply allocated to extensions
+    address[] extensions               // Array of extension addresses used
 );
+```
+
+**Event Details:**
+- Emitted on successful token deployment via `deployToken()`
+- Contains complete deployment information
+- Use `tokenAddress` to track new tokens
+- `extensionsSupply` shows total tokens sent to extensions
+- `extensions[]` lists all extension contracts that received tokens
+
+**Parsing with SDK:**
+```typescript
+import { parseTokenCreatedEvent } from '@dutchiono/fey-sdk';
+
+const receipt = await provider.getTransactionReceipt(txHash);
+const event = parseTokenCreatedEvent(receipt);
+
+if (event) {
+  console.log('Token:', event.tokenAddress);
+  console.log('Admin:', event.tokenAdmin);
+  console.log('Name:', event.tokenName);
+  console.log('Symbol:', event.tokenSymbol);
+  console.log('Hook:', event.poolHook);
+  console.log('Locker:', event.locker);
+  console.log('Extensions:', event.extensions);
+}
 ```
 
 ### System Configuration
 
 ```solidity
-event SetHook(address indexed hook, bool enabled);
-event SetLocker(address indexed locker, address indexed hook, bool enabled);
-event SetExtension(address indexed extension, bool enabled);
-event SetMevModule(address indexed mevModule, bool enabled);
+event SetAdmin(address indexed admin, bool enabled);
+event SetBaseToken(address oldBaseToken, address newBaseToken);
+event SetBootstrap(address bootstrap);
+event SetDeprecated(bool deprecated);
+event SetExtension(address extension, bool enabled);
+event SetFeeLocker(address oldFeeLocker, address newFeeLocker);
+event SetHook(address hook, bool enabled);
+event SetLocker(address locker, address hook, bool enabled);
+event SetMevModule(address mevModule, bool enabled);
+event SetTeamFeeRecipient(address oldTeamFeeRecipient, address newTeamFeeRecipient);
+event SetFeeLockerFrozen();
+event SetTeamFeeRecipientFrozen();
 ```
 
 ### Fee Management
 
 ```solidity
-event ClaimFees(address indexed token, address indexed recipient, uint256 amount);
-event ExtensionTriggered(address indexed extension, uint256 tokenAmount, uint256 ethAmount);
+event ClaimFees(
+    address indexed token,        // Token address
+    address indexed recipient,    // Fee recipient
+    uint256 amount               // Amount claimed
+);
+
+event ExtensionTriggered(
+    address extension,           // Extension contract address
+    uint256 extensionSupply,    // Token amount sent to extension
+    uint256 msgValue            // ETH amount sent to extension
+);
+```
+
+### Ownership
+
+```solidity
+event OwnershipTransferred(
+    address indexed previousOwner,
+    address indexed newOwner
+);
 ```
 
 ## Usage Examples
 
-### Query Token Deployment Info
+### Using the Official SDK
+
+The recommended way to interact with the Factory contract is through the official SDK:
+
+```typescript
+import {
+  buildSimpleDeployTokenTx,
+  parseTokenCreatedEvent,
+  getTokenDeploymentInfo,
+  getFeyFactoryContract,
+  FEY_FACTORY_ADDRESS,
+} from '@dutchiono/fey-sdk';
+import { ethers } from 'ethers';
+
+const provider = new ethers.JsonRpcProvider('https://mainnet.base.org');
+const signer = new ethers.Wallet(PRIVATE_KEY, provider);
+
+// Deploy a token
+const tx = buildSimpleDeployTokenTx({
+  tokenAdmin: await signer.getAddress(),
+  name: 'My Token',
+  symbol: 'TKN',
+  image: 'ipfs://Qm...',
+  metadata: 'ipfs://Qm...',
+  context: '',
+  originatingChainId: 8453n,
+});
+
+const txResponse = await signer.sendTransaction(tx);
+const receipt = await txResponse.wait();
+
+// Parse the TokenCreated event
+const event = parseTokenCreatedEvent(receipt);
+if (event) {
+  console.log('Token deployed at:', event.tokenAddress);
+  console.log('Token admin:', event.tokenAdmin);
+  console.log('Pool hook:', event.poolHook);
+  console.log('Locker:', event.locker);
+}
+
+// Query deployment info
+const info = await getTokenDeploymentInfo(provider, event.tokenAddress);
+console.log('Complete deployment info:', info);
+```
+
+### Manual Contract Interaction
 
 ```javascript
-// Get deployment details for FEY token
+// Get complete deployment details for a token
 const deploymentInfo = await factory.tokenDeploymentInfo(
   "0xD09cf0982A32DD6856e12d6BF2F08A822eA5D91D"
 );
+console.log("Token:", deploymentInfo.token);
 console.log("Locker:", deploymentInfo.locker);
 console.log("Hook:", deploymentInfo.hook);
 console.log("Extensions:", deploymentInfo.extensions);
+
+// Get basic deployment info (token, hook, locker only)
+const basicInfo = await factory.deploymentInfoForToken(tokenAddress);
+console.log("Token:", basicInfo.token);
+console.log("Hook:", basicInfo.hook);
+console.log("Locker:", basicInfo.locker);
+```
+
+### Check Module Status
+
+```javascript
+// Check if a hook is enabled
+const hookEnabled = await factory.enabledHooks(hookAddress);
+
+// Check if a locker/hook combination is enabled
+const lockerEnabled = await factory.enabledLockers(lockerAddress, hookAddress);
+
+// Check if an extension is enabled
+const extensionEnabled = await factory.enabledExtensions(extensionAddress);
+
+// Check if an MEV module is enabled
+const mevEnabled = await factory.enabledMevModules(mevModuleAddress);
+
+// Check if an address is an admin
+const isAdmin = await factory.admins(adminAddress);
 ```
 
 ### Check System Status
@@ -259,10 +454,27 @@ console.log("Extensions:", deploymentInfo.extensions);
 const isDeprecated = await factory.deprecated();
 const baseToken = await factory.baseToken();
 const teamRecipient = await factory.teamFeeRecipient();
+const feeLocker = await factory.feeLocker();
+const bootstrap = await factory.bootstrap();
+const owner = await factory.owner();
+const feeLockerFrozen = await factory.feeLockerFrozen();
+const freezeFeeRecipient = await factory.freezeFeeRecipient();
 
 console.log("Factory deprecated:", isDeprecated);
 console.log("Base token:", baseToken);
 console.log("Team recipient:", teamRecipient);
+console.log("Fee locker:", feeLocker);
+console.log("Bootstrap:", bootstrap);
+console.log("Owner:", owner);
+console.log("Fee locker frozen:", feeLockerFrozen);
+console.log("Fee recipient frozen:", freezeFeeRecipient);
+
+// Get constants
+const bps = await factory.BPS();
+const maxExtensions = await factory.MAX_EXTENSIONS();
+const maxExtensionBps = await factory.MAX_EXTENSION_BPS();
+const tokenSupply = await factory.TOKEN_SUPPLY();
+const weth = await factory.WETH();
 ```
 
 ### Monitor Fee Claims
@@ -276,13 +488,42 @@ factory.on("ClaimFees", (token, recipient, amount, event) => {
 
 ## Integration Notes
 
+### Using the Official SDK
+
+The recommended approach is to use the official Fey SDK:
+
+```typescript
+import {
+  buildSimpleDeployTokenTx,
+  parseTokenCreatedEvent,
+  getTokenDeploymentInfo,
+  validateDeployPayload,
+} from '@dutchiono/fey-sdk';
+
+// Validate payload before deployment
+const validation = validateDeployPayload(payload);
+if (!validation.valid) {
+  throw new Error(validation.errors.join(', '));
+}
+
+// Build and send transaction
+const tx = buildSimpleDeployTokenTx(payload);
+const receipt = await signer.sendTransaction(tx).then(tx => tx.wait());
+
+// Parse event to get token address
+const event = parseTokenCreatedEvent(receipt);
+```
+
+See the [SDK Guide →](/guides/sdk) for complete documentation.
+
 ### For Frontend Developers
 
 **Token Deployment Interface:**
-1. Collect deployment configuration from user
-2. Prepare extension configurations (dev buy amounts, etc.)
-3. Call `deployToken()` with appropriate ETH value
-4. Monitor `TokenCreated` event for deployment confirmation
+1. Use `buildSimpleDeployTokenTx()` from the SDK
+2. Collect deployment configuration from user
+3. Validate with `validateDeployPayload()`
+4. Send transaction with appropriate ETH value
+5. Parse `TokenCreated` event for deployment confirmation
 
 **Fee Monitoring:**
 1. Track fee accumulation in factory
@@ -297,14 +538,16 @@ factory.on("ClaimFees", (token, recipient, amount, event) => {
 3. Test integration with deployment flow
 
 **State Monitoring:**
-1. Monitor deployment events for new tokens
+1. Monitor deployment events for new tokens using `parseTokenCreatedEvent()`
 2. Track fee flows and distributions
-3. Query deployment info for analytics
+3. Query deployment info using `getTokenDeploymentInfo()`
 
 ---
 
 ## Related Documentation
 
+- **SDK Guide**: [Fey SDK →](/guides/sdk)
+- **Integration Guide**: [Integration Patterns →](/guides/integration)
 - **Hook System**: [Hook Contract →](/contracts/hook)
 - **Token Details**: [FEY Token →](/contracts/token)
 - **Deployment Flow**: [Token Deployment →](/flows/deployment)

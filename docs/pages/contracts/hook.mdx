@@ -1,7 +1,186 @@
+---
+title: "Hook Contract - Uniswap V4 Pool Hooks"
+description: "Explore FEY Protocol Hook contract - fee management, MEV protection, and pool extensions for Uniswap V4 pools"
+head:
+  - name: fc:miniapp
+    content: '{"version":"1","imageUrl":"https://feydocs.lat/miniapp/contracts-og.svg","button":{"title":"📋 View Contracts","action":{"type":"launch_miniapp","name":"FEY Protocol Docs","url":"https://feydocs.lat/contracts/hook","splashImageUrl":"https://feydocs.lat/images/logo.svg","splashBackgroundColor":"#0a4d1a"}}}'
+  - property: og:title
+    content: "Hook Contract - FEY Protocol Pool Hooks"
+  - property: og:description
+    content: "Explore FEY Protocol Hook contract - fee management, MEV protection, and pool extensions for Uniswap V4 pools"
+---
+
 # Hook Contract
 
-This page documents the Hook contract functionality.
+The Hook contract implements Uniswap V4 hooks for FEY Protocol pools, providing dynamic fee management, MEV protection, and pool extension support.
 
-## Coming Soon
+**Contract Address**: `0x5B409184204b86f708d3aeBb3cad3F02835f68cC`
 
-Detailed Hook contract documentation will be available here.
+## Overview
+
+The Hook contract (FeyHookStaticFeeV2) is integrated with Uniswap V4 pools to provide:
+
+- **Dynamic Fees**: Directional fee management (FEY → Paired and Paired → FEY)
+- **MEV Protection**: Optional MEV module integration for pool protection
+- **Pool Extensions**: Support for pool-specific extensions (dev buys, etc.)
+- **Locker Integration**: Links pools to LP lockers for reward distribution
+
+### Key Responsibilities
+
+- **Fee Management**: Sets and tracks directional fees for each pool
+- **Pool Configuration**: Stores pool-specific settings (locker, MEV module, extensions)
+- **Protocol Integration**: Connects pools to factory, fee locker, and LP locker
+
+## Core Functions
+
+### Configuration Views
+
+```solidity
+function factory() external view returns (address)
+function baseToken() external view returns (address)
+function weth() external view returns (address)
+function poolExtensionAllowlist() external view returns (address)
+function protocolFee() external view returns (uint24)
+```
+
+**Configuration Details:**
+- `factory`: FEY Factory contract address
+- `baseToken`: FEY token address (base pairing token)
+- `weth`: WETH address on Base
+- `poolExtensionAllowlist`: Contract that controls approved pool extensions
+- `protocolFee`: Current protocol fee rate (uint24)
+
+### Pool-Specific Queries
+
+```solidity
+function feyIsToken0(bytes32 poolId) external view returns (bool)
+function locker(bytes32 poolId) external view returns (address)
+function mevModule(bytes32 poolId) external view returns (address)
+function mevModuleEnabled(bytes32 poolId) external view returns (bool)
+function poolExtension(bytes32 poolId) external view returns (address)
+function poolExtensionSetup(bytes32 poolId) external view returns (bool)
+function feyFee(bytes32 poolId) external view returns (uint24)
+function pairedFee(bytes32 poolId) external view returns (uint24)
+function poolCreationTimestamp(bytes32 poolId) external view returns (uint256)
+```
+
+**Pool Information:**
+- `feyIsToken0`: Whether FEY is token0 in the pool
+- `locker`: LP locker address for this pool
+- `mevModule`: MEV protection module address (if enabled)
+- `mevModuleEnabled`: Whether MEV protection is active
+- `poolExtension`: Pool extension address (if configured)
+- `poolExtensionSetup`: Whether pool extension is configured
+- `feyFee`: Fee for FEY → Paired direction (uint24)
+- `pairedFee`: Fee for Paired → FEY direction (uint24)
+- `poolCreationTimestamp`: Unix timestamp when pool was created
+
+### Constants
+
+```solidity
+function MAX_LP_FEE() external view returns (uint24)
+function MAX_MEV_LP_FEE() external view returns (uint24)
+function MAX_MEV_MODULE_DELAY() external view returns (uint256)
+function PROTOCOL_FEE_NUMERATOR() external view returns (uint256)
+```
+
+**Protocol Limits:**
+- `MAX_LP_FEE`: Maximum allowed LP fee
+- `MAX_MEV_LP_FEE`: Maximum allowed MEV LP fee
+- `MAX_MEV_MODULE_DELAY`: Maximum delay for MEV module activation
+- `PROTOCOL_FEE_NUMERATOR`: Protocol fee calculation numerator
+
+## Usage Examples
+
+### Using the SDK
+
+The recommended way to interact with the Hook contract is through the SDK:
+
+```typescript
+import {
+  getHookConfig,
+  getPoolInfo,
+  getPoolFees,
+  isFeyToken0,
+  FEY_HOOK_ADDRESS,
+} from '@dutchiono/fey-sdk';
+import { ethers } from 'ethers';
+
+const provider = new ethers.JsonRpcProvider('https://mainnet.base.org');
+
+// Get hook configuration
+const hookConfig = await getHookConfig(provider);
+console.log('Factory:', hookConfig?.factory);
+console.log('Protocol Fee:', hookConfig?.protocolFee);
+
+// Get pool information
+const poolId = '0xe155c517c53f078f4b443c99436e42c1b80fd2fb1b3508f431c46b8365e4f3f0';
+const poolInfo = await getPoolInfo(provider, poolId);
+if (poolInfo) {
+  console.log('FEY is Token0:', poolInfo.feyIsToken0);
+  console.log('Locker:', poolInfo.locker);
+  console.log('FEY Fee:', poolInfo.feyFee);
+  console.log('Paired Fee:', poolInfo.pairedFee);
+}
+
+// Query individual properties
+const fees = await getPoolFees(provider, poolId);
+console.log('Pool Fees:', fees);
+```
+
+### Manual Contract Interaction
+
+```javascript
+const hook = new ethers.Contract(
+  '0x5B409184204b86f708d3aeBb3cad3F02835f68cC',
+  hookABI,
+  provider
+);
+
+// Get hook configuration
+const factory = await hook.factory();
+const baseToken = await hook.baseToken();
+const protocolFee = await hook.protocolFee();
+
+// Get pool information
+const poolId = '0xe155c517c53f078f4b443c99436e42c1b80fd2fb1b3508f431c46b8365e4f3f0';
+const feyIsToken0 = await hook.feyIsToken0(poolId);
+const locker = await hook.locker(poolId);
+const feyFee = await hook.feyFee(poolId);
+const pairedFee = await hook.pairedFee(poolId);
+
+// Get MEV protection status
+const mevModule = await hook.mevModule(poolId);
+const mevEnabled = await hook.mevModuleEnabled(poolId);
+
+// Get pool extension
+const poolExtension = await hook.poolExtension(poolId);
+const extensionSetup = await hook.poolExtensionSetup(poolId);
+```
+
+## Integration Notes
+
+### For Frontend Developers
+
+**Pool Information Display:**
+1. Use `getPoolInfo()` to fetch complete pool data
+2. Display directional fees using `feyFee` and `pairedFee`
+3. Show MEV protection status with `mevModuleEnabled`
+4. Link to LP locker for reward information
+
+### For Protocol Integrators
+
+**Pool Monitoring:**
+1. Query pool configuration after deployment
+2. Monitor fee changes through pool queries
+3. Track MEV module status for security analytics
+4. Verify pool extensions are properly configured
+
+---
+
+## Related Documentation
+
+- **SDK Guide**: [Fey SDK →](/guides/sdk)
+- **Factory Contract**: [Factory →](/contracts/factory)
+- **Cast Commands**: [Hook Queries →](/guides/cast-commands#hook-contract-queries)
+- **Pool Information**: [Reference →](/reference/addresses#pool-information)

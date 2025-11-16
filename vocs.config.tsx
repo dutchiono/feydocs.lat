@@ -24,7 +24,7 @@ function injectMetaTags(): Plugin {
           console.log('[Farcaster SDK] Importing @farcaster/miniapp-sdk');
           const sdkModule = await import('@farcaster/miniapp-sdk');
           console.log('[Farcaster SDK] Raw import result:', sdkModule);
-          
+
           // Handle both named and default exports
           const sdk = sdkModule.sdk || sdkModule.default;
           console.log('[Farcaster SDK] SDK object:', sdk);
@@ -182,6 +182,7 @@ export default defineConfig({
     {
       text: "Developer Guides",
       items: [
+        { text: "Fey SDK", link: "/guides/sdk" },
         { text: "Integration Guide", link: "/guides/integration" },
         { text: "Building Extensions", link: "/guides/extensions" },
         { text: "State Queries", link: "/guides/queries" },

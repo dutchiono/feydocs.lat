@@ -120,7 +120,29 @@ interface DeploymentConfig {
 
 ### 3. Deploy Your Token
 
-Call the Factory contract:
+**Using the SDK (Recommended):**
+
+```typescript
+import { buildSimpleDeployTokenTx, parseTokenCreatedEvent } from '@dutchiono/fey-sdk';
+
+const tx = buildSimpleDeployTokenTx({
+  tokenAdmin: await signer.getAddress(),
+  name: 'My Token',
+  symbol: 'TKN',
+  image: 'ipfs://Qm...',
+  metadata: 'ipfs://Qm...',
+  context: '',
+  originatingChainId: 8453n,
+}, {
+  value: ethers.parseEther('1.0'), // ETH for dev buy extension
+});
+
+const receipt = await (await signer.sendTransaction(tx)).wait();
+const event = parseTokenCreatedEvent(receipt);
+console.log('Token deployed at:', event?.tokenAddress);
+```
+
+**Manual Contract Call:**
 
 ```solidity
 function deployToken(DeploymentConfig memory config)
@@ -130,6 +152,8 @@ function deployToken(DeploymentConfig memory config)
 :::tip[Dev Buy]
 Include ETH with your deployment to automatically purchase your tokens through the dev buy extension.
 :::
+
+See the [SDK Guide →](/guides/sdk) or [Deployment Flow →](/flows/deployment) for detailed instructions.
 
 ### 4. Earn Creator Rewards
 
@@ -141,7 +165,45 @@ After deployment:
 
 ## For Developers
 
-### 1. Contract Integration
+### 1. Install the Official SDK (Recommended)
+
+The easiest way to integrate FEY Protocol is using the official TypeScript SDK:
+
+```bash
+npm install @dutchiono/fey-sdk ethers
+```
+
+```typescript
+import {
+  buildSimpleDeployTokenTx,
+  parseTokenCreatedEvent,
+  getTokenDeploymentInfo,
+  FEY_FACTORY_ADDRESS,
+} from '@dutchiono/fey-sdk';
+import { ethers } from 'ethers';
+
+// Deploy a token
+const provider = new ethers.JsonRpcProvider('https://mainnet.base.org');
+const signer = new ethers.Wallet(PRIVATE_KEY, provider);
+
+const tx = buildSimpleDeployTokenTx({
+  tokenAdmin: await signer.getAddress(),
+  name: 'My Token',
+  symbol: 'TKN',
+  image: 'ipfs://Qm...',
+  metadata: 'ipfs://Qm...',
+  context: '',
+  originatingChainId: 8453n,
+});
+
+const receipt = await (await signer.sendTransaction(tx)).wait();
+const event = parseTokenCreatedEvent(receipt);
+console.log('Token deployed at:', event?.tokenAddress);
+```
+
+See the [SDK Guide →](/guides/sdk) for complete documentation.
+
+### 2. Contract Integration
 
 Key contracts for integration:
 
@@ -156,7 +218,7 @@ const contracts = {
 };
 ```
 
-### 2. Query Protocol State
+### 3. Query Protocol State
 
 Use cast or web3 libraries to query state:
 
@@ -171,7 +233,7 @@ cast call 0x8EEF0dC80ADf57908bB1be0236c2a72a7e379C2d \
   --rpc-url https://mainnet.base.org
 ```
 
-### 3. Build Extensions
+### 4. Build Extensions
 
 To build protocol extensions:
 
@@ -181,7 +243,7 @@ To build protocol extensions:
 
 See [Building Extensions →](/guides/extensions) for detailed instructions.
 
-### 4. Monitor Protocol Activity
+### 5. Monitor Protocol Activity
 
 Track protocol events:
 
