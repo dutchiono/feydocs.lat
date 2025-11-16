@@ -585,18 +585,22 @@ await signer.sendTransaction(setAdminTx);
 
 ### 12. Utilities
 
+#### Address Prediction & Salt Generation
+
 ```typescript
 import {
   generateSalt,
   generateSaltFromString,
   generateSaltForToken0,
   generateSaltForToken0Simple,
+  computeFactorySalt,
+  computeCreate2Address,
+  predictTokenAddressFromSalt,
+  findAddressBelowTarget,
   stringToBytes32,
-  estimateGas,
-  waitForTransaction,
-  getTokenData,
-  getTokenMetadata,
+  FEY_FACTORY_ADDRESS,
   FEY_TOKEN_ADDRESS,
+  DEFAULT_TOKEN_INITIAL_SUPPLY,
 } from '@dutchiono/fey-sdk';
 
 // Generate salt for deterministic addresses
@@ -612,22 +616,119 @@ const token0Salt = generateSaltForToken0Simple(
 );
 
 // For precise control, generate salt with CREATE2 address computation
-// (requires deployer address and bytecode hash)
-const deployerAddress = '0x...'; // FeyDeployer contract address
-const bytecodeHash = '0x...'; // Hash of token bytecode
-const preciseToken0Salt = generateSaltForToken0(
-  deployerAddress,
-  bytecodeHash,
-  10000 // max attempts
+// (requires initCodeHash from token bytecode + constructor args)
+const tokenAdmin = '0x...';
+const initCodeHash = '0x...'; // keccak256(encoded deploy data with bytecode + args)
+const result = await findAddressBelowTarget(
+  tokenAdmin,
+  initCodeHash,
+  FEY_TOKEN_ADDRESS,
+  FEY_FACTORY_ADDRESS,
+  500_000 // max attempts (matches deployer default)
 );
-if (preciseToken0Salt) {
-  console.log('Found salt that ensures token0:', preciseToken0Salt);
+if (result) {
+  console.log('Found salt:', result.salt);
+  console.log('Predicted address:', result.token);
 }
+
+// Predict token address from salt (useful for verifying token0 ordering)
+const predictedAddress = predictTokenAddressFromSalt(
+  salt,
+  tokenAdmin,
+  initCodeHash,
+  FEY_FACTORY_ADDRESS
+);
+console.log('Token will be deployed at:', predictedAddress);
+
+// Compute factory salt (used internally)
+const factorySalt = computeFactorySalt(tokenAdmin, salt);
+
+// Compute CREATE2 address directly
+const create2Address = computeCreate2Address(
+  FEY_FACTORY_ADDRESS,
+  factorySalt,
+  initCodeHash
+);
 ```
 
 **Important:** When deploying tokens with pools (using `buildSimpleDeployTokenTx`), the SDK automatically generates a salt that ensures the deployed token will be token0 (address < FEY address). This is critical for proper pool ordering in Uniswap V4. If you provide your own salt, ensure it will produce a token address less than `0xD09cf0982A32DD6856e12d6BF2F08A822eA5D91D` (FEY token address).
 
+#### Pool & Locker Data Encoding
+
 ```typescript
+import {
+  encodeStaticFeePoolData,
+  encodeLockerFeePreferences,
+} from '@dutchiono/fey-sdk';
+
+// Encode pool data for static fee pools
+// Fees are specified in basis points (bps), converted to PPM (parts per million)
+const poolData = encodeStaticFeePoolData(
+  100, // feyFeeBps (1% = 100 bps)
+  100  // pairedFeeBps (1% = 100 bps)
+);
+// Returns encoded data: (address extension, bytes extensionData, bytes feeData)
+// feeData encodes: (uint24 feyFeePpm, uint24 pairedFeePpm)
+
+// Encode locker fee preferences
+// 0 = FEY token, 1 = Paired token
+const feePreferences = [1, 1, 1]; // All recipients prefer paired token
+const lockerData = encodeLockerFeePreferences(feePreferences);
+// Returns encoded data: { feePreference: uint8[] }
+```
+
+#### Tick Calculation for Market Cap
+
+```typescript
+import {
+  calculateTicksForMarketCap,
+  priceToTick,
+  tickToPrice,
+  roundTickToSpacing,
+  DEFAULT_TICK_SPACING,
+} from '@dutchiono/fey-sdk';
+
+// IMPORTANT: Tick spacing must ALWAYS be 200 (DEFAULT_TICK_SPACING)
+// All ticks must be multiples of 200
+
+// Calculate ticks for 27k USD market cap (target for all token deployments)
+// Requires FEY price in USD (fetch from oracle/API)
+const feyPriceUSD = 0.50; // Example: $0.50 per FEY
+const { tickLower, tickUpper } = calculateTicksForMarketCap(
+  feyPriceUSD,
+  27_000, // Target market cap: $27,000
+  undefined, // Uses DEFAULT_TOKEN_INITIAL_SUPPLY if not provided
+  DEFAULT_TICK_SPACING, // Always 200
+  40_000 // Tick range width (default: 40000)
+);
+
+console.log(`Tick range for 27k market cap: [${tickLower}, ${tickUpper}]`);
+// Output: Tick range centered around price for 27k market cap
+
+// Convert between price and ticks
+const price = tickToPrice(tickLower);
+const tick = priceToTick(price);
+
+// Round tick to spacing (always needed)
+const roundedTick = roundTickToSpacing(tick, DEFAULT_TICK_SPACING);
+```
+
+**Critical Notes:**
+- **Tick spacing is ALWAYS 200** - This is enforced by `DEFAULT_TICK_SPACING`
+- **Ticks must be multiples of 200** - Use `roundTickToSpacing()` to ensure compliance
+- **27k market cap target** - All tokens should target $27,000 market cap at deployment
+- **FEY price required** - You need to fetch FEY price in USD to calculate accurate ticks
+
+#### Transaction Utilities
+
+```typescript
+import {
+  estimateGas,
+  waitForTransaction,
+  getTokenData,
+  getTokenMetadata,
+} from '@dutchiono/fey-sdk';
+
 // Convert string to bytes32
 const bytes32 = stringToBytes32('my-string');
 
@@ -868,6 +969,30 @@ npm test
 **Network:**
 - **`BASE_MAINNET_CHAIN_ID`** - Base mainnet chain ID (8453)
 - **`BASE_TESTNET_CHAIN_ID`** - Base testnet chain ID (84532)
+
+**Token Constants:**
+- **`DEFAULT_TOKEN_INITIAL_SUPPLY`** - Default initial supply for tokens (100_000_000_000n * 10n ** 18n)
+- **`DEFAULT_CHAIN_ID`** - Default chain ID (8453n)
+- **`DEFAULT_TICK_SPACING`** - Default tick spacing (200)
+- **`DEFAULT_STARTING_TICK`** - Default starting tick (-10400)
+- **`DYNAMIC_FEE_FLAG`** - Uniswap v4 dynamic LP fee flag (0x800000)
+
+**Address Prediction & Salt Generation:**
+- **`computeFactorySalt(admin, innerSalt)`** - Compute factory salt from admin and inner salt
+- **`computeCreate2Address(factoryAddress, factorySalt, initCodeHash)`** - Compute CREATE2 address
+- **`predictTokenAddressFromSalt(salt, tokenAdmin, initCodeHash, factoryAddress?)`** - Predict token address from salt
+- **`findAddressBelowTarget(tokenAdmin, initCodeHash, targetAddress?, factoryAddress?, maxAttempts?)`** - Find salt that ensures token0 ordering
+
+**Encoding Utilities:**
+- **`encodeStaticFeePoolData(feyFeeBps, pairedFeeBps)`** - Encode pool data for static fee pools
+- **`encodeLockerFeePreferences(preferences)`** - Encode locker fee preferences (0 = FEY, 1 = Paired)
+
+**Tick Calculation Utilities:**
+- **`calculateTicksForMarketCap(feyPriceUSD, targetMarketCapUSD?, tokenSupply?, tickSpacing?, tickRangeWidth?)`** - Calculate tickLower/tickUpper for target market cap (default: 27k USD)
+- **`priceToTick(price)`** - Convert price ratio to tick
+- **`tickToPrice(tick)`** - Convert tick to price ratio
+- **`roundTickToSpacing(tick, tickSpacing?)`** - Round tick to nearest multiple of spacing
+- **`calculateStartingTick(tickSpacing?)`** - Calculate starting tick (-10400 default)
 
 **ABIs and Interfaces:**
 - **`FEY_FACTORY_ABI`** - Factory contract ABI
