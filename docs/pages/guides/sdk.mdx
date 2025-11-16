@@ -653,6 +653,8 @@ const create2Address = computeCreate2Address(
 
 **Important:** When deploying tokens with pools (using `buildSimpleDeployTokenTx`), the SDK automatically generates a salt that ensures the deployed token will be token0 (address < FEY address). This is critical for proper pool ordering in Uniswap V4. If you provide your own salt, ensure it will produce a token address less than `0xD09cf0982A32DD6856e12d6BF2F08A822eA5D91D` (FEY token address).
 
+**Using Token Artifacts:** The easiest way to generate salts is using `generateSaltForToken0FromArtifact()` which takes the token artifact (from `feyToken.json` compiled artifact) and automatically computes the `initCodeHash` from the bytecode and constructor arguments. This matches the deployer's exact implementation and ensures compatibility.
+
 #### Pool & Locker Data Encoding
 
 ```typescript
@@ -980,8 +982,10 @@ npm test
 **Address Prediction & Salt Generation:**
 - **`computeFactorySalt(admin, innerSalt)`** - Compute factory salt from admin and inner salt
 - **`computeCreate2Address(factoryAddress, factorySalt, initCodeHash)`** - Compute CREATE2 address
+- **`computeTokenInitCodeHash(bytecode, constructorArgs)`** - Compute initCodeHash from token bytecode and constructor arguments
 - **`predictTokenAddressFromSalt(salt, tokenAdmin, initCodeHash, factoryAddress?)`** - Predict token address from salt
-- **`findAddressBelowTarget(tokenAdmin, initCodeHash, targetAddress?, factoryAddress?, maxAttempts?)`** - Find salt that ensures token0 ordering
+- **`findAddressBelowTarget(tokenAdmin, initCodeHash, targetAddress?, factoryAddress?, maxAttempts?)`** - Find salt that ensures token0 ordering (requires initCodeHash)
+- **`generateSaltForToken0FromArtifact(artifact, tokenConfig, options?)`** - **RECOMMENDED**: Generate salt using token artifact (automatically computes initCodeHash)
 
 **Encoding Utilities:**
 - **`encodeStaticFeePoolData(feyFeeBps, pairedFeeBps)`** - Encode pool data for static fee pools
