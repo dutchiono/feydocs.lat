@@ -615,10 +615,55 @@ const token0Salt = generateSaltForToken0Simple(
   '0x...' // tokenAdmin
 );
 
-// For precise control, generate salt with CREATE2 address computation
+// RECOMMENDED: Generate salt using token artifact (easiest method)
+// This automatically computes initCodeHash from the artifact bytecode
+import feyTokenArtifact from './feyToken.json';
+import { generateSaltForToken0FromArtifact } from '@dutchiono/fey-sdk';
+
+const artifactResult = await generateSaltForToken0FromArtifact(
+  feyTokenArtifact,
+  {
+    name: 'My Token',
+    symbol: 'TKN',
+    tokenAdmin: '0x...',
+    image: 'ipfs://Qm...',
+    metadata: 'ipfs://Qm...',
+    context: '',
+    // Optional: defaults to DEFAULT_CHAIN_ID (8453) and DEFAULT_TOKEN_INITIAL_SUPPLY
+    chainId: 8453n,
+    initialSupply: 100_000_000_000n * 10n ** 18n,
+  },
+  {
+    // Optional: defaults shown below
+    targetAddress: FEY_TOKEN_ADDRESS,
+    factoryAddress: FEY_FACTORY_ADDRESS,
+    maxAttempts: 500_000,
+  }
+);
+
+if (artifactResult) {
+  console.log('Found salt:', artifactResult.salt);
+  console.log('Predicted address:', artifactResult.token);
+  // Use artifactResult.salt in your deployment
+}
+
+// For manual control, generate salt with CREATE2 address computation
 // (requires initCodeHash from token bytecode + constructor args)
+import { computeTokenInitCodeHash } from '@dutchiono/fey-sdk';
+
 const tokenAdmin = '0x...';
-const initCodeHash = '0x...'; // keccak256(encoded deploy data with bytecode + args)
+const bytecode = feyTokenArtifact.bytecode.object;
+const initCodeHash = computeTokenInitCodeHash(bytecode, {
+  name: 'My Token',
+  symbol: 'TKN',
+  initialSupply: 100_000_000_000n * 10n ** 18n,
+  tokenAdmin,
+  image: 'ipfs://Qm...',
+  metadata: 'ipfs://Qm...',
+  context: '',
+  chainId: 8453n,
+});
+
 const result = await findAddressBelowTarget(
   tokenAdmin,
   initCodeHash,
